@@ -4,6 +4,7 @@ from typing import List, Dict, Union, Any
 import pandas as pd
 import numpy as np
 import subprocess
+import logging
 
 
 class DataAnalyst:
@@ -116,7 +117,7 @@ class DataAnalyst:
             std_estimates,
             interaction,
         ]
-        subprocess.run(command)
+        return subprocess.run(command, capture_output=True, text=True)
 
     def format_summary_stats(self, variable, dataframe, decimal_places=2):
         """
@@ -429,9 +430,14 @@ class DataAnalyst:
             std_estimates (bool): Whether to standardize the estimates
         """
         syntax = self.generate_sem_syntax(interaction=interaction)
-        self.estimate_sem(
+        estimation = self.estimate_sem(
             data_dir, syntax, std_estimates=std_estimates, interaction=interaction
         )
+        if estimation.returncode != 0:
+            stderr = estimation.stderr.strip() or estimation.stdout.strip() or "Unknown R error"
+            logging.warning("SEM estimation failed: %s", stderr)
+            return False
+
         var_info = self.var_info_to_latex()
         # read in the estimates_df.csv as it's created by the R script, saved in the folder with the data/
         tag = ""
@@ -439,7 +445,12 @@ class DataAnalyst:
             tag += "_interaction"
         if std_estimates:
             tag += "_std"
-        tikz_pic = self.lavaan_to_tikz(os.path.join(data_dir, f"estimates{tag}_df.csv"))
+        estimates_path = os.path.join(data_dir, f"estimates{tag}_df.csv")
+        if not os.path.exists(estimates_path):
+            logging.warning("SEM estimation did not produce %s", estimates_path)
+            return False
+
+        tikz_pic = self.lavaan_to_tikz(estimates_path)
         scenario_name = self.scenario_description
         if interaction:
             fig_file_name = scenario_name + "_scm_interaction.tex"
@@ -458,6 +469,7 @@ class DataAnalyst:
                 file.write(table_latex)
         with open(os.path.join(final_output_dir, fig_file_name), "w") as file:
             file.write(latex_string)
+        return True
 
 
 # NOTE THIS WILL FAIL IF RUN HERE!!!!!!

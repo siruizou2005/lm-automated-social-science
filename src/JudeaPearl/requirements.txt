@@ -1,11 +1,8 @@
-openai==2.24.0
+openai==2.8.1
 seaborn==0.13.2
 pandas==2.2.3
 numpy==2.3.1
 matplotlib==3.10.1
-langchain==0.3.25
-langchain-community==0.3.24
-langchain-openai==0.3.16
 scipy==1.15.2
 statsmodels
 click==8.1.8

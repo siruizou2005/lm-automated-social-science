@@ -26,16 +26,33 @@ from src import ERRORS, __app_name__, __version__, config, database
 from src import __app_name__, __version__
 
 
-from LLM import LanguageModel, LLMMixin, llm_json_loader, make_llm
-from AgentBuilder import AgentBuilder
-from Human import Human
-from Interaction import SocialInteraction
-from StructuralCausalModelBuilder import StructuralCausalModelBuilder
-from Prompting import PromptMixin
-from JudeaPearl import JudeaPearl
-from DataParser import DataParser
-from DataCleaner import DataCleaner
-from DataAnalyst import DataAnalyst
+_RUNTIME_IMPORT_ERROR = None
+try:
+    from LLM import LanguageModel, LLMMixin, llm_json_loader, make_llm
+    from AgentBuilder import AgentBuilder
+    from Human import Human
+    from Interaction import SocialInteraction
+    from StructuralCausalModelBuilder import StructuralCausalModelBuilder
+    from Prompting import PromptMixin
+    from JudeaPearl import JudeaPearl
+    from DataParser import DataParser
+    from DataCleaner import DataCleaner
+    from DataAnalyst import DataAnalyst
+except ImportError as exc:
+    _RUNTIME_IMPORT_ERROR = exc
+    LanguageModel = None
+    LLMMixin = None
+    llm_json_loader = None
+    make_llm = None
+    AgentBuilder = None
+    Human = None
+    SocialInteraction = None
+    StructuralCausalModelBuilder = None
+    PromptMixin = None
+    JudeaPearl = None
+    DataParser = None
+    DataCleaner = None
+    DataAnalyst = None
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -48,6 +65,14 @@ env = Environment(loader=FileSystemLoader(templates_dir))
 app = typer.Typer()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+def _require_runtime_imports() -> None:
+    if _RUNTIME_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "Optional runtime dependencies are missing. "
+            "Install the project requirements before running this command."
+        ) from _RUNTIME_IMPORT_ERROR
 
 # @app.command()
 # def init(
@@ -80,6 +105,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def build_agent(scm_json: str, 
                 temp_scientist: float = typer.Option(0.3, help="Temperature for the large language model scientist")):
     """Build the agents."""
+    _require_runtime_imports()
     typer.echo(f"Building agent from file {scm_json}")
     LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
 
@@ -99,6 +125,7 @@ def build_agent(scm_json: str,
 def build_interaction(scm_json: str,
                       temp_scientist: float = typer.Option(0.3, help="Temperature for the large language model scientist")):
     """Build the interaction type."""
+    _require_runtime_imports()
     # typer.echo(f"Building interaction from SCM JSON")
     
     LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
@@ -123,6 +150,7 @@ def perform_simulation(
         temp_subject: float = typer.Option(0.3, help="Temperature for the large language model agents")
     ):
     """Perform agent simulation"""
+    _require_runtime_imports()
     # typer.echo(f"Processing scenario: {scenario} with max interactions: {max_interactions}")
     
     agentsInfo = agent_list
@@ -239,6 +267,7 @@ def sequential_run(func, combined_dicts, output_dir, **params):
 
 def call_measurement(history: str, measurementsInfo: str, agent_str: str, ENDOGENOUS_VARIABLES: List[str], SCNEARIO_DESCRIPTION: str, OPERATIONALIZATION:str):
     """Perform measurements based on the simulation history"""
+    _require_runtime_imports()
     responses = {}
     LLM = make_llm("subject", temperature=0.0)
     prompt_mixin = PromptMixin()
@@ -367,16 +396,15 @@ def end_to_end(
     ## check point
     typer.echo(f"Success in building the SCM and it's saved to {output_dir}")
     
-    run_experiment_with_scm(
-        scm_path = saved_file_path, 
-        mode=mode, 
+    return run_experiment_with_scm(
+        scm_path=saved_file_path,
+        mode=mode,
         max_interactions=max_interactions,
-        temp_scientist=temp_scientist, 
+        temp_scientist=temp_scientist,
         temp_subject=temp_subject,
         subsample=subsample,
-        sample_proportion=sample_proportion)
-    
-    return "Success!"
+        sample_proportion=sample_proportion,
+    )
 
 def _rebuild_avm_from_sample(sample_dict, combined_dicts, full_avm):
     """Rebuild attribute_value_mapping for a subsampled list by matching agents back to original indices."""
@@ -390,6 +418,29 @@ def _rebuild_avm_from_sample(sample_dict, combined_dicts, full_avm):
             # If no match found, use new_idx as-is (shouldn't happen)
             filtered[str(new_idx)] = full_avm.get(str(new_idx), {})
     return filtered
+
+
+def _scm_signature(scm_dict):
+    """Create a stable SCM signature so cached artifacts can be invalidated safely."""
+    return json.dumps(scm_dict, sort_keys=True)
+
+
+def _checkpoint_matches_scm(checkpoint_data, scm_signature):
+    return checkpoint_data.get("scm_signature") == scm_signature
+
+
+def _history_checkpoint_matches(
+    history_data, scm_signature, sample_count, max_interactions, temp_subject
+):
+    histories = history_data.get("histories")
+    return (
+        history_data.get("scm_signature") == scm_signature
+        and history_data.get("sample_count") == sample_count
+        and history_data.get("max_interactions") == max_interactions
+        and history_data.get("temp_subject") == temp_subject
+        and isinstance(histories, list)
+        and len(histories) == sample_count
+    )
 
 
 @app.command()
@@ -418,6 +469,7 @@ def run_experiment_with_scm(
             scm = json.load(file)
         scm_dict = json.loads(scm)
         scenario = scm_dict["args"]["scenario_description"]
+        scm_signature = _scm_signature(scm_dict)
         measurementsInfo, ENDOGENOUS_VARIABLES, OPERATIONALIZATION = get_info_from_scm(scm_dict)
     except FileNotFoundError:
         logging.error("SCM file not found.")
@@ -428,6 +480,7 @@ def run_experiment_with_scm(
       
     ## Added the check point
     agent_filepath = os.path.join(output_dir, f"agent_{scenario}.json")
+    agent_checkpoint_valid = False
     ## give the scm (give by uploading)
     if os.path.exists(agent_filepath):
         print('agents info already built')
@@ -436,20 +489,24 @@ def run_experiment_with_scm(
             with open(agent_filepath, "r") as file:
                 data_dict = json.load(file)
                 # print(type(data_dict))
-            exp_role = data_dict["exp_role"]
-            variations = data_dict["variations"]
-            interaction_type = data_dict["interaction_type"]
-            order_dict = data_dict["order_dict"]
-            sample_dict = data_dict["combined_dicts"]
-            # Use saved (filtered) attribute_value_mapping if available
-            if "attribute_value_mapping" in data_dict:
-                attribute_value_mapping = data_dict["attribute_value_mapping"]
+            if _checkpoint_matches_scm(data_dict, scm_signature):
+                exp_role = data_dict["exp_role"]
+                variations = data_dict["variations"]
+                interaction_type = data_dict["interaction_type"]
+                order_dict = data_dict["order_dict"]
+                sample_dict = data_dict["combined_dicts"]
+                # Use saved (filtered) attribute_value_mapping if available
+                if "attribute_value_mapping" in data_dict:
+                    attribute_value_mapping = data_dict["attribute_value_mapping"]
+                else:
+                    # Fallback for old checkpoint files: regenerate and rebuild mapping from sample_dict
+                    combined_dicts, attribute_value_mapping = generate_all_combinations_with_mapping(exp_role, variations)
+                    attribute_value_mapping = _rebuild_avm_from_sample(
+                        sample_dict, combined_dicts, attribute_value_mapping
+                    )
+                agent_checkpoint_valid = True
             else:
-                # Fallback for old checkpoint files: regenerate and rebuild mapping from sample_dict
-                combined_dicts, attribute_value_mapping = generate_all_combinations_with_mapping(exp_role, variations)
-                attribute_value_mapping = _rebuild_avm_from_sample(
-                    sample_dict, combined_dicts, attribute_value_mapping
-                )
+                print("agent checkpoint is stale; rebuilding from current SCM")
         except FileNotFoundError:
             logging.error("Agent file not found.")
             return "File Error!"
@@ -457,7 +514,7 @@ def run_experiment_with_scm(
             logging.error("Error decoding Agent JSON.")
             return "JSON Error!"
 
-    else:
+    if not agent_checkpoint_valid:
         exp_role, variations = build_agent(scm_json=scm, temp_scientist=temp_scientist)
         interaction_type, order_dict = build_interaction(scm_json=scm, temp_scientist=temp_scientist)
         print('Roles',exp_role, 'Attribute variations', variations)
@@ -480,7 +537,8 @@ def run_experiment_with_scm(
             "order_dict": order_dict,
             'measurementsInfo': measurementsInfo,
             'combined_dicts': sample_dict,
-            'attribute_value_mapping': attribute_value_mapping
+            'attribute_value_mapping': attribute_value_mapping,
+            'scm_signature': scm_signature,
         }
         
         # Save the string to a file
@@ -488,21 +546,31 @@ def run_experiment_with_scm(
             
     ## Added the check point
     history_filepath = os.path.join(output_dir, f"history_{scenario}.json")
+    histories = None
     if os.path.exists(history_filepath):
         print('agents history already there')
         # If the file exists, read the content
         try:
             with open(history_filepath, "r") as file:
                 data_dict = json.load(file)
+            if _history_checkpoint_matches(
+                data_dict,
+                scm_signature,
+                len(sample_dict),
+                max_interactions,
+                temp_subject,
+            ):
                 histories = data_dict['histories']
-            print('variations', len(histories)) 
+                print('variations', len(histories))
+            else:
+                print("history checkpoint is stale; rebuilding from current SCM")
         except FileNotFoundError:
             logging.error("History file not found.")
             return "File Error!"
         except json.JSONDecodeError:
             logging.error("Error decoding History JSON.")
             return "JSON Error!"
-    else:
+    if histories is None:
         params = {
             "scenario": scenario,
             "order_dict": order_dict,
@@ -517,6 +585,17 @@ def run_experiment_with_scm(
             histories = parallel_run(perform_simulation, sample_dict, output_dir, **params)
         elif mode == "sequential":
             histories = sequential_run(perform_simulation, sample_dict, output_dir, **params)
+        save_json(
+            {
+                "histories": histories,
+                "scm_signature": scm_signature,
+                "sample_count": len(sample_dict),
+                "max_interactions": max_interactions,
+                "temp_subject": temp_subject,
+            },
+            f"history_{scenario}.json",
+            output_dir,
+        )
             
     
     # Perform parallel measurements  
@@ -540,9 +619,7 @@ def run_experiment_with_scm(
          
     ## Analyze the data and fit the SCM
     data_path = os.path.join(output_dir, f"result_{scenario}.json")
-    analysis_data(file_path=data_path, temp_scientist=temp_scientist)
-    
-    return "Success!"
+    return analysis_data(file_path=data_path, temp_scientist=temp_scientist)
 
 @app.command() 
 def build_scm(
@@ -592,6 +669,7 @@ def get_agents(
     
     This function fetches the names of agents participating in a specified scenario using LLM scientist. 
     """
+    _require_runtime_imports()
     typer.echo(f"Get agent for scenario '{scenario}'")
     
     LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who is interested in studying social scenarios.')
@@ -610,6 +688,7 @@ def get_outcome(
     """
     Generating possible outcomes for scenario
     """
+    _require_runtime_imports()
     typer.echo(f"Generating possible outcomes for scenario {scenario}")
 
     LLM = make_llm("scientist", temp_scientist, system_prompt='You are an economist who is interested in studying social scenarios.')
@@ -630,6 +709,7 @@ def build_outcome(
     """
     Build the selected outcome for scenario
     """
+    _require_runtime_imports()
     typer.echo(f"Build the selected outcome {target_outcome} for scenario {scenario}")
     
     LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
@@ -663,6 +743,7 @@ def get_cause(
     """
     Get possible causes for given outcome
     """
+    _require_runtime_imports()
     typer.echo(f"Get possible causes for given outcome {target_outcome}")
     
     LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
@@ -692,6 +773,7 @@ def build_cause(
     """
     Build the selected cause for outcome
     """
+    _require_runtime_imports()
     typer.echo(f"Build the selected cause {target_cause} for outcome {target_outcome}")
     
     LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
@@ -729,6 +811,7 @@ def build_cause_with_scm(
         FileNotFoundError: If the specified scm_path does not lead to a valid file.
         json.JSONDecodeError: If there is an error in decoding the JSON data from the specified file.
     """
+    _require_runtime_imports()
     ## read from JSON file
     try:
         with open(scm_path, 'r') as file:
@@ -786,6 +869,7 @@ def add_line(
     target_outcome (str): The name of the outcome variable that is affected by the cause.
     scm_path (str): The file path to the structural causal model (SCM) stored in JSON format.
     """
+    _require_runtime_imports()
     typer.echo(f"Adding a line from {target_cause} to {target_outcome} in SCM at {scm_path}.")
     output_dir = "experiment_logs"
     ensure_directory(output_dir)
@@ -835,6 +919,7 @@ def delete_cause(
     target_outcome (str): The identifier or name of the outcome variable from which the cause is removed.
     scm_path (str): The filesystem path to the JSON file that stores the SCM data structure.
     """
+    _require_runtime_imports()
     typer.echo(f"Attempting to delete the cause '{target_cause}' affecting '{target_outcome}' from SCM at {scm_path}.")
     
     output_dir = "experiment_logs"
@@ -877,6 +962,7 @@ def analysis_data(
     Then it will use the linear regression to fit the paths defined in the SCM.
     
     '''
+    _require_runtime_imports()
     typer.echo(f"Analyzing the results at {file_path}.")
     timestring = pd.Timestamp.now().strftime("%Y-%m-%d_%H-%M-%S")
     output_dir = f"experiment_logs/analyis__{timestring}"
@@ -931,13 +1017,19 @@ def analysis_data(
             scm_simple,
             # scenario,
         )
-    data_analyst.analyze_data(
-            output_dir,
-            final_output_dir=output_dir,
-            interaction=False,
-            std_estimates=False,
-            )
+    analysis_succeeded = data_analyst.analyze_data(
+        output_dir,
+        final_output_dir=output_dir,
+        interaction=False,
+        std_estimates=False,
+    )
+    if not analysis_succeeded:
+        typer.echo(
+            f"Data cleaning completed, but SEM estimation failed. Intermediate outputs are stored in {output_dir}."
+        )
+        return "Analysis Error!"
     typer.echo(f"The analysis is stored in  {output_dir}.")
+    return "Success!"
 
 def _version_callback(value: bool) -> None:
     if value:

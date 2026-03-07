@@ -1,5 +1,8 @@
 from openai import OpenAI, RateLimitError
-import replicate
+try:
+    import replicate
+except ImportError:
+    replicate = None
 from dotenv import load_dotenv
 import os
 import re
@@ -25,18 +28,7 @@ class LanguageModel(RegisteredSerializable):
         self.temperature: float = temperature
         self.max_tokens: int = max_tokens
         self.system_prompt: str = system_prompt
-        # base_url defaults to OpenAI; set OPENAI_BASE_URL in .env to use OpenRouter or any compatible endpoint
-        # timeout: 120s per request (default is 600s); max_retries=0 because tenacity handles retries
-        client_kwargs = {
-            "api_key": os.getenv('OPENAI_API_KEY'),
-            "timeout": float(os.getenv('OPENAI_TIMEOUT', '120')),
-            "max_retries": 0,
-        }
-        if base_url := os.getenv('OPENAI_BASE_URL'):
-            client_kwargs["base_url"] = base_url
-        else:
-            client_kwargs["organization"] = os.getenv('ORGANIZATION_ID')
-        self.client = OpenAI(**client_kwargs)
+        self.client = None
 
         # openrouter accepts any model name; all other families require explicit registration
         self.family_model_mapping = {
@@ -60,6 +52,31 @@ class LanguageModel(RegisteredSerializable):
         else:
             raise ValueError(f"Family '{family}' not supported.")
 
+    def _get_openai_client(self) -> OpenAI:
+        if self.client is None:
+            # base_url defaults to OpenAI; set OPENAI_BASE_URL in .env to use OpenRouter or any compatible endpoint
+            # timeout: 120s per request (default is 600s); max_retries=0 because tenacity handles retries
+            client_kwargs = {
+                "api_key": os.getenv('OPENAI_API_KEY'),
+                "timeout": float(os.getenv('OPENAI_TIMEOUT', '120')),
+                "max_retries": 0,
+            }
+            if base_url := os.getenv('OPENAI_BASE_URL'):
+                client_kwargs["base_url"] = base_url
+            else:
+                organization = os.getenv('ORGANIZATION_ID')
+                if organization:
+                    client_kwargs["organization"] = organization
+            self.client = OpenAI(**client_kwargs)
+        return self.client
+
+    def _get_replicate_module(self):
+        if replicate is None:
+            raise ImportError(
+                "replicate package is required to use the replicate model family."
+            )
+        return replicate
+
 
     def __repr__(self):
         string = f'''Family: {self.family}\nModel: {self.model}\nTemperature: {self.temperature}'''
@@ -82,7 +99,7 @@ class LanguageModel(RegisteredSerializable):
                 kwargs["max_tokens"] = self.max_tokens
             if response_format is not None:
                 kwargs["response_format"] = response_format
-            response = self.client.chat.completions.create(**kwargs)
+            response = self._get_openai_client().chat.completions.create(**kwargs)
             return response.choices[0].message.content
 
         except RateLimitError as e:
@@ -100,7 +117,7 @@ class LanguageModel(RegisteredSerializable):
     def call_openai_api(self, prompt: str) -> str:
         # text-davinci-003 (Completion API) is discontinued; route through chat completions
         try:
-            response = self.client.chat.completions.create(
+            response = self._get_openai_client().chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=100,
@@ -115,8 +132,9 @@ class LanguageModel(RegisteredSerializable):
             raise
 
     def call_llama70b_v2(self, prompt: str) -> str:
+        replicate_module = self._get_replicate_module()
         model = "replicate/llama-2-70b-chat:2796ee9483c3fd7aa2e171d38f4ca12251a30609463dcfd4cd76703f22e96cdf"
-        output = replicate.run(model,
+        output = replicate_module.run(model,
                         input={"prompt":prompt,
                         "top_p": 1,
                         "system_prompt": """You are a helpful assistant.""",
@@ -129,8 +147,9 @@ class LanguageModel(RegisteredSerializable):
         return result
     
     def call_llama13b_v2(self, prompt: str, top_p: float = 1, max_length: int = 500, repetition_penalty: float = 1) -> str:
+        replicate_module = self._get_replicate_module()
         model = "a16z-infra/llama-2-13b-chat:d5da4236b006f967ceb7da037be9cfc3924b20d21fed88e1e94f19d56e2d3111"
-        output = replicate.run(model,
+        output = replicate_module.run(model,
                         input={"prompt":prompt,
                         "top_p": 1,
                         "system_prompt": """You are a helpful assistant.""",
@@ -166,10 +185,24 @@ def _strip_markdown_json(text: str) -> str:
     return match.group(1).strip() if match else text
 
 
+def _normalize_json_text(text: str) -> str:
+    """Normalize smart quotes so JSON emitted by chat models remains parseable."""
+    return text.translate(
+        str.maketrans(
+            {
+                "\u201c": '"',
+                "\u201d": '"',
+                "\u2018": "'",
+                "\u2019": "'",
+            }
+        )
+    )
+
+
 def llm_json_loader(raw_llm_output: str) -> Dict[str, str]:
     """Parse JSON from LLM output, stripping markdown fences and retrying with corrector on failure."""
     # Strip markdown fences before first attempt (handles models that wrap JSON in ```json blocks)
-    llm_output: str = _strip_markdown_json(raw_llm_output)
+    llm_output: str = _normalize_json_text(_strip_markdown_json(raw_llm_output))
     for attempt in range(3):
         try:
             llm_json = json.loads(llm_output.lower())
@@ -186,7 +219,7 @@ def llm_json_loader(raw_llm_output: str) -> Dict[str, str]:
 
     print(f'ORIGINAL STRING FROM LLM: {raw_llm_output}')
     print(f'FINAL FAILED STRING FROM LLM: {llm_output}')
-    raise JSONDecodeError("INVALID JSON")
+    raise JSONDecodeError("INVALID JSON", llm_output, 0)
 
 def make_llm(role: str, temperature: float, system_prompt: str = "") -> "LanguageModel":
     """Create a LanguageModel using role-based env vars.
@@ -211,7 +244,7 @@ def json_corrector(llm_output: str, error_doc, error_pos) -> str:
         "Return only the corrected JSON with no extra text."
     )
     llm_cleaned_output = LLM.call_llm(cleanup_prompt)
-    return _strip_markdown_json(llm_cleaned_output).lower()
+    return _normalize_json_text(_strip_markdown_json(llm_cleaned_output)).lower()
 
 
 

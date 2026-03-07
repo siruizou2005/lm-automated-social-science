@@ -1,12 +1,19 @@
 import inspect
 import json
 import jinja2
-import replicate
+try:
+    import replicate
+except ImportError:
+    replicate = None
 from openai import OpenAI
 from types import MethodType
 
 
 registry = {}
+NON_SERIALIZABLE_TYPES = [jinja2.Environment, MethodType, OpenAI]
+if replicate is not None:
+    NON_SERIALIZABLE_TYPES.append(replicate.Client)
+NON_SERIALIZABLE_TYPES = tuple(NON_SERIALIZABLE_TYPES)
 
 
 def register_class(target_class):
@@ -39,9 +46,7 @@ class RegisteredSerializable(metaclass=Meta):
 
         serial_dict = {"class": self.__class__.__name__, "args": {}}
         for k, v in self.__dict__.items():
-            if not callable(v) and not isinstance(
-                v, (jinja2.Environment, MethodType, replicate.Client, OpenAI)
-            ):
+            if not callable(v) and not isinstance(v, NON_SERIALIZABLE_TYPES):
                 serial_dict["args"][k] = serialize_value(v)
         return serial_dict
 
