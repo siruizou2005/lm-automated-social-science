@@ -2,6 +2,7 @@ import inspect
 import json
 import jinja2
 import replicate
+from openai import OpenAI
 from types import MethodType
 
 
@@ -39,7 +40,7 @@ class RegisteredSerializable(metaclass=Meta):
         serial_dict = {"class": self.__class__.__name__, "args": {}}
         for k, v in self.__dict__.items():
             if not callable(v) and not isinstance(
-                v, (jinja2.Environment, MethodType, replicate.Client)
+                v, (jinja2.Environment, MethodType, replicate.Client, OpenAI)
             ):
                 serial_dict["args"][k] = serialize_value(v)
         return serial_dict

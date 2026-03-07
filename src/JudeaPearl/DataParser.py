@@ -1,5 +1,6 @@
 import sys
 import json
+import logging
 from typing import List, Dict, Tuple, Union, Optional, Any, Callable
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -9,11 +10,13 @@ import numpy as np
 import math
 from collections import Counter
 
+logger = logging.getLogger(__name__)
+
 sys.path.append("./src/LLM")
 sys.path.append("./src/Serialization")
 sys.path.append("./src/Question")
 
-from LLM import LanguageModel, llm_json_loader, LLMMixin
+from LLM import LanguageModel, llm_json_loader, LLMMixin, make_llm
 from Serialize import RegisteredSerializable
 from Variable import (
     Variable,
@@ -174,8 +177,12 @@ class DataParser(PromptMixin, LLMMixin, RegisteredSerializable):
         variable = self.scm.variable_dict[var_name]
         for agent in survey[var_name].keys():
             for question, answer_str in survey[var_name][agent].items():
-                answer_dict = json.loads(answer_str)
+                answer_dict = llm_json_loader(answer_str)
                 answer = answer_dict["answer"]
+                logger.info(
+                    f"parse_single_question_per_measure: var='{var_name}', "
+                    f"agent='{agent}', raw answer='{answer}'"
+                )
                 data_single = self.parse_single_question(
                     variable, question, answer, agent
                 )
@@ -211,7 +218,7 @@ class DataParser(PromptMixin, LLMMixin, RegisteredSerializable):
         for agent in survey[var_name].keys():
             # doesn't work for multiple questions per agent for the same variable
             for question, answer_str in survey[var_name][agent].items():
-                answer_dict = json.loads(answer_str)
+                answer_dict = llm_json_loader(answer_str)
                 data_single = self.parse_single_question(
                     variable, question, answer_dict["answer"], agent
                 )
@@ -261,7 +268,7 @@ class DataParser(PromptMixin, LLMMixin, RegisteredSerializable):
         data_dict = llm_json_loader(raw_output)
         answer = data_dict["answer"]
         if answer == "na":
-            return np.NaN
+            return np.nan
 
         # if there are any problems parsing the data, just return nan so that the code compiles
         try:
@@ -269,7 +276,12 @@ class DataParser(PromptMixin, LLMMixin, RegisteredSerializable):
                 float(answer) if variable.variable_type == "continuous" else int(answer)
             )
         except ValueError:
-            return np.NaN
+            logger.warning(
+                f"Failed to parse answer for variable '{variable.name}': "
+                f"raw answer='{answer}', expected type={variable.variable_type}. "
+                f"Returning np.nan."
+            )
+            return np.nan
 
     @retry_on_keyerror_decorator
     def get_aggregation_method(self, variable: Variable, measurements: List) -> Dict:
@@ -354,6 +366,9 @@ class DataParser(PromptMixin, LLMMixin, RegisteredSerializable):
         if not self.interaction_data[interaction_num]:
             return None
 
+        if "survey" not in self.interaction_data[interaction_num]:
+            return None
+
         survey = self.interaction_data[interaction_num]["survey"]
         single_observation = {}
 
@@ -377,20 +392,10 @@ class DataParser(PromptMixin, LLMMixin, RegisteredSerializable):
         return single_observation
 
     def get_data_from_interactions(self):
-        with ProcessPoolExecutor() as executor:
-            # Submit tasks to the executor
-            futures = {
-                executor.submit(
-                    self.process_interaction, interaction_num
-                ): interaction_num
-                for interaction_num in self.interaction_data.keys()
-            }
-
-            # Process results
-            for future in as_completed(futures):
-                result = future.result()
-                if result is not None:
-                    self.data_frame.loc[len(self.data_frame)] = result
+        # Sequential processing: OpenAI client contains unpicklable locks,
+        # so ProcessPoolExecutor cannot be used.
+        for interaction_num in self.interaction_data.keys():
+            self.process_interaction(interaction_num)
 
     def gather_meta_data(self) -> Dict:
         """
@@ -444,7 +449,7 @@ class DataParser(PromptMixin, LLMMixin, RegisteredSerializable):
 
 
 if __name__ == "__main__":
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=0.1)
+    LLM = make_llm("scientist", temperature=0.1)
     directory_path = "/Users/benjaminmanning/Desktop/test/"
     file_name = "result.json"
     file_path = os.path.join(directory_path, file_name)

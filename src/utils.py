@@ -118,24 +118,35 @@ def get_valid_number(prompt):
             typer.echo("Error: Please enter a valid number.")
 
 
-def subsampler(target_list: list, proportion: float):
+def subsampler(target_list: list, proportion: float, attribute_value_mapping: dict = None):
     """
-    Subsample a list by a specific proportion.
+    Subsample a list by a specific proportion, keeping attribute_value_mapping in sync.
 
     Args:
     target_list (list): The list from which to subsample.
     proportion (float): The proportion of the list to sample, expressed as a float (e.g., 0.5 for 50%).
+    attribute_value_mapping (dict, optional): The mapping to filter in sync with the subsample.
 
     Returns:
-    list: A list containing a subsample of the original list.
+    tuple: (subsampled list, filtered attribute_value_mapping) if attribute_value_mapping is provided,
+           otherwise just the subsampled list.
     """
     if proportion > 1.000001:
         sys.exit("Error: Exceeding the maximal number! Enter a proportion from 0 to 1.")
     length = len(target_list)
     if length == 1:
-        sample_number = 1
-        subsample_list =  target_list
+        sampled_indices = [0]
     else:
-        sample_number = math.ceil(length * proportion) 
-        subsample_list = random.sample(target_list, sample_number)
+        sample_number = math.ceil(length * proportion)
+        sampled_indices = sorted(random.sample(range(length), sample_number))
+
+    subsample_list = [target_list[i] for i in sampled_indices]
+
+    if attribute_value_mapping is not None:
+        # Re-index the mapping so sampled items get consecutive keys 0, 1, 2, ...
+        filtered_mapping = {}
+        for new_idx, old_idx in enumerate(sampled_indices):
+            filtered_mapping[str(new_idx)] = attribute_value_mapping[str(old_idx)]
+        return subsample_list, filtered_mapping
+
     return subsample_list

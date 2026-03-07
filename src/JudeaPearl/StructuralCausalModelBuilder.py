@@ -11,7 +11,7 @@ sys.path.append("../LLM")
 sys.path.append("../Serialization")
 sys.path.append("../Question")
 
-from LLM import LanguageModel, LLMMixin
+from LLM import LanguageModel, LLMMixin, make_llm
 from Variable import EndogenousVariable, ExogenousVariable
 from Serialize import RegisteredSerializable
 from Prompting import PromptMixin
@@ -475,7 +475,7 @@ class StructuralCausalModelBuilder(PromptMixin, LLMMixin, RegisteredSerializable
 if __name__ == "__main__":
     if True:
         # NOTE PREDETERMINED CAUSES
-        LLM = LanguageModel(family="openai", model="gpt-4", temperature=0.01)
+        LLM = make_llm("scientist", temperature=0.01)
         scenario_description = "A person who cares a lot about fairness at a store buying a snow shovel after a snowstorm"
         agents_in_scenario = ["store employee", "customer"]
         outcome_variable = "whether the person buys the snow shovel"

@@ -11,7 +11,7 @@ sys.path.append("../JudeaPearl")
 sys.path.append("../LLM")
 from Variable import EndogenousVariable, Variable
 from StructuralCausalModelBuilder import StructuralCausalModelBuilder
-from LLM import LanguageModel, LLMMixin, llm_json_loader
+from LLM import LanguageModel, LLMMixin, llm_json_loader, make_llm
 
 
 class RaiseCategoricalVariableError(Exception):
@@ -38,11 +38,11 @@ class DataCleaner(LLMMixin):
         interaction_data: Dict[str, Dict],
         cleaned_data: pd.DataFrame,
         meta_data: Dict,
-        LLM=LanguageModel(family="openai", model="gpt-4", temperature=0.1),
+        LLM=None,
     ) -> None:
         # Initialize the Structural Causal Model (SCM)
         self.scm = self._initialize_scm(interaction_data["scm"])
-        self.LLM = LLM
+        self.LLM = LLM if LLM is not None else make_llm("scientist", temperature=0.1)
 
         # Extract interaction data and attribute-value mapping from the SCM interaction data
         self.interaction_data = interaction_data["data"]

@@ -4,7 +4,7 @@ from typing import Dict, List, Union, Optional, Any
 
 sys.path.append("../LLM")
 
-from LLM import LLMMixin, LanguageModel
+from LLM import LLMMixin, LanguageModel, make_llm
 from Variable import EndogenousVariable, ExogenousVariable
 
 
@@ -180,7 +180,7 @@ class CausalVariableBuilder(LLMMixin):
 
 
 if __name__ == "__main__":
-    LLM = LanguageModel(family="openai", model="gpt-4", max_tokens=500, temperature=0.3)
+    LLM = make_llm("scientist", temperature=0.3)
     scenario_dict = {
         "a person getting cognitive behavioral therapy": ["therapist", "patient"],
         "an auction for a single contract with many bidders": [

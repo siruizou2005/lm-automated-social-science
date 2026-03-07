@@ -26,7 +26,7 @@ from src import ERRORS, __app_name__, __version__, config, database
 from src import __app_name__, __version__
 
 
-from LLM import LanguageModel, LLMMixin, llm_json_loader
+from LLM import LanguageModel, LLMMixin, llm_json_loader, make_llm
 from AgentBuilder import AgentBuilder
 from Human import Human
 from Interaction import SocialInteraction
@@ -81,10 +81,10 @@ def build_agent(scm_json: str,
                 temp_scientist: float = typer.Option(0.3, help="Temperature for the large language model scientist")):
     """Build the agents."""
     typer.echo(f"Building agent from file {scm_json}")
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
-    
+    LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
+
     loaded_scm = StructuralCausalModelBuilder.deserialize(scm_json)
-    
+
     agent_builder = AgentBuilder(template_dir=templates_dir)
     agent_builder.add_LLM(LLM)
     agent_builder.add_scm(loaded_scm)
@@ -101,8 +101,8 @@ def build_interaction(scm_json: str,
     """Build the interaction type."""
     # typer.echo(f"Building interaction from SCM JSON")
     
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
-    
+    LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
+
     loaded_scm = StructuralCausalModelBuilder.deserialize(scm_json)
     agent_builder = AgentBuilder(template_dir=templates_dir)
     agent_builder.add_LLM(LLM)
@@ -126,7 +126,7 @@ def perform_simulation(
     # typer.echo(f"Processing scenario: {scenario} with max interactions: {max_interactions}")
     
     agentsInfo = agent_list
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_subject)
+    LLM = make_llm("subject", temp_subject)
     
     agents = {}
     agent_list = []
@@ -240,7 +240,7 @@ def sequential_run(func, combined_dicts, output_dir, **params):
 def call_measurement(history: str, measurementsInfo: str, agent_str: str, ENDOGENOUS_VARIABLES: List[str], SCNEARIO_DESCRIPTION: str, OPERATIONALIZATION:str):
     """Perform measurements based on the simulation history"""
     responses = {}
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=.0)
+    LLM = make_llm("subject", temperature=0.0)
     prompt_mixin = PromptMixin()
 
     agents = {}
@@ -378,7 +378,21 @@ def end_to_end(
     
     return "Success!"
 
-@app.command() 
+def _rebuild_avm_from_sample(sample_dict, combined_dicts, full_avm):
+    """Rebuild attribute_value_mapping for a subsampled list by matching agents back to original indices."""
+    filtered = {}
+    for new_idx, sample_item in enumerate(sample_dict):
+        for old_idx, orig_item in enumerate(combined_dicts):
+            if sample_item == orig_item:
+                filtered[str(new_idx)] = full_avm[str(old_idx)]
+                break
+        else:
+            # If no match found, use new_idx as-is (shouldn't happen)
+            filtered[str(new_idx)] = full_avm.get(str(new_idx), {})
+    return filtered
+
+
+@app.command()
 def run_experiment_with_scm(
     scm_path: str = typer.Argument(..., help="The path to the JSON file containing the SCM data."),
     mode: str = typer.Option("sequential", help="The mode for running the experiment, either 'sequential' or 'parallel'."), 
@@ -427,14 +441,21 @@ def run_experiment_with_scm(
             interaction_type = data_dict["interaction_type"]
             order_dict = data_dict["order_dict"]
             sample_dict = data_dict["combined_dicts"]
+            # Use saved (filtered) attribute_value_mapping if available
+            if "attribute_value_mapping" in data_dict:
+                attribute_value_mapping = data_dict["attribute_value_mapping"]
+            else:
+                # Fallback for old checkpoint files: regenerate and rebuild mapping from sample_dict
+                combined_dicts, attribute_value_mapping = generate_all_combinations_with_mapping(exp_role, variations)
+                attribute_value_mapping = _rebuild_avm_from_sample(
+                    sample_dict, combined_dicts, attribute_value_mapping
+                )
         except FileNotFoundError:
             logging.error("Agent file not found.")
             return "File Error!"
         except json.JSONDecodeError:
             logging.error("Error decoding Agent JSON.")
             return "JSON Error!"
-        # measurementsInfo = data_dict["measurementsInfo"]
-        combined_dicts, attribute_value_mapping = generate_all_combinations_with_mapping(exp_role, variations)
 
     else:
         exp_role, variations = build_agent(scm_json=scm, temp_scientist=temp_scientist)
@@ -445,7 +466,10 @@ def run_experiment_with_scm(
         combined_dicts, attribute_value_mapping = generate_all_combinations_with_mapping(exp_role, variations)
         
         if subsample is True:
-            sample_dict = subsampler(combined_dicts, proportion=float(sample_proportion))
+            sample_dict, attribute_value_mapping = subsampler(
+                combined_dicts, proportion=float(sample_proportion),
+                attribute_value_mapping=attribute_value_mapping
+            )
         else:
             sample_dict = combined_dicts
         
@@ -455,7 +479,8 @@ def run_experiment_with_scm(
             "interaction_type": interaction_type,
             "order_dict": order_dict,
             'measurementsInfo': measurementsInfo,
-            'combined_dicts': sample_dict
+            'combined_dicts': sample_dict,
+            'attribute_value_mapping': attribute_value_mapping
         }
         
         # Save the string to a file
@@ -569,7 +594,7 @@ def get_agents(
     """
     typer.echo(f"Get agent for scenario '{scenario}'")
     
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist, system_prompt='You are a social scientist who is interested in studying social scenarios.')
+    LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who is interested in studying social scenarios.')
     JP = JudeaPearl(scenario, template_dir=templates_dir)
     JP.add_LLM(LLM)
     human_agents_list = JP.backend_get_human_agents()
@@ -587,7 +612,7 @@ def get_outcome(
     """
     typer.echo(f"Generating possible outcomes for scenario {scenario}")
 
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist, system_prompt='You are an economist who is interested in studying social scenarios.')
+    LLM = make_llm("scientist", temp_scientist, system_prompt='You are an economist who is interested in studying social scenarios.')
     JP = JudeaPearl(scenario, template_dir=templates_dir)
     JP.add_LLM(LLM)
     outcomes = JP.backend_outcome_generator(count=n_outcomes)
@@ -607,8 +632,8 @@ def build_outcome(
     """
     typer.echo(f"Build the selected outcome {target_outcome} for scenario {scenario}")
     
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
-    
+    LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
+
     ## Define the scenario and agents
     scenario_description = scenario
     agents_in_scenario = agents
@@ -640,12 +665,12 @@ def get_cause(
     """
     typer.echo(f"Get possible causes for given outcome {target_outcome}")
     
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
-    
+    LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
+
     # Instantiate the SCM
     loaded_scm = StructuralCausalModelBuilder.deserialize(scm_json)
     loaded_scm.add_LLM(LLM)
-    
+
     cause = loaded_scm.backend_get_causes_for_variable(target_outcome, num_causes = n_causes)
     typer.echo('####2#######')
     typer.echo(cause)
@@ -669,13 +694,13 @@ def build_cause(
     """
     typer.echo(f"Build the selected cause {target_cause} for outcome {target_outcome}")
     
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
-    
+    LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
+
     loaded_scm = StructuralCausalModelBuilder.deserialize(scm_json)
     loaded_scm.add_LLM(LLM)
-    
+
     loaded_scm.backend_add_cause(target_outcome, target_cause)
-    typer.echo('####3#######') 
+    typer.echo('####3#######')
     typer.echo('Adding cause...')
     # print(loaded_scm)
     
@@ -719,7 +744,7 @@ def build_cause_with_scm(
         logging.error("Error decoding SCM JSON.")
         return "JSON Error!"
     typer.echo(f"Build the selected cause {target_cause} for outcome {target_outcome}")
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
+    LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
     output_dir = "experiment_logs"
     ensure_directory(output_dir)
     
@@ -777,7 +802,7 @@ def add_line(
         return "JSON Error!"
     typer.echo(f"Add a cause relation between cause {target_cause} and  outcome {target_outcome}")
     
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
+    LLM = make_llm("scientist", temp_scientist, system_prompt='You are a social scientist who loves research and coming up with ideas.')
     target_outcome = f"'{target_outcome}'"
     
     loaded_scm = StructuralCausalModelBuilder.deserialize(scm)
@@ -858,7 +883,7 @@ def analysis_data(
     # output_dir = "experiment_logs"
     ensure_directory(output_dir)
     
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=temp_scientist)
+    LLM = make_llm("scientist", temp_scientist)
 
     try:
         with open(file_path, 'r') as f:

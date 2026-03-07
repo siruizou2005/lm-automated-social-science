@@ -45,7 +45,7 @@ Some potential system failures that we expect some people to run into that we ca
 - OpenAI Rate-Limit Errors: Extensive rate limiting has been implemented within the system; however, depending on the specific account details, the system may experience stalling.
 - Lack of Outcome Variation: If the experiment fails to induce variation in the outcome, the system will be unable to estimate a Structural Causal Model (SCM). For instance, in a scenario involving two individuals engaged in bargaining, if they never reach an agreement, Lavaan, the package utilized for estimation, will generate an error unless all variables have a variance greater than zero. Fundamentally, this signifies that the experiment has failed, as the causes did not influence the outcome. Even in such cases, the system will still generate a `data.csv` file, which will reveal that the outcome had zero variance.
 - Conditional Outcome Never Occurs: A related issue may arise if the outcome is conditional and never materializes. In the bargaining scenario, if the outcome is defined as the final price of a deal, and no deal is reached, the same error will occur as described in the previous point.
-- Suboptimal LLM-Generated SCM: The LLM)generating the SCM may occasionally provide an inadequate response. Although numerous checks have been integrated into the system to mitigate this, if the temperature of the "scientist" portion of the system exceeds zero, this issue may sporadically occur, and there is no perfect method to verify every possible natural language edge case.
+- Suboptimal LLM-Generated SCM: The LLM generating the SCM may occasionally provide an inadequate response. Although numerous checks have been integrated into the system to mitigate this, if the temperature of the "scientist" portion of the system exceeds zero, this issue may sporadically occur, and there is no perfect method to verify every possible natural language edge case.
 - System Execution Success Rate: Based on our experience, the system successfully executes an experiment without encountering an error approximately 70% of the time. In most cases, rerunning the process should resolve the majority of issues.
 
 <!-- - PyPI: ... -->
@@ -83,15 +83,23 @@ python -m venv myvenv
 source myvenv/bin/activate
 pip install -r requirements.txt
 ```
-- You need to have a .env file that contains your openai API key
+- Copy `.env.example` to `.env` and fill in your credentials:
 ```
-touch .env
-nano .env
+cp .env.example .env
 ```
-In the text editor，replace the  ... with your actual OpenAI API key：
+At minimum, set your OpenAI API key and optionally your organization ID:
 ```
-OPENAI_API_KEY = ...
+OPENAI_API_KEY=sk-...
+ORGANIZATION_ID=org-...
 ```
+You can also configure which model is used for each role via environment variables (defaults to `gpt-4` for both):
+```
+LLM_SCIENTIST_FAMILY=openai   # used for SCM design, agent building, data analysis
+LLM_SCIENTIST_MODEL=gpt-4
+LLM_SUBJECT_FAMILY=openai     # used for simulation agents in conversations
+LLM_SUBJECT_MODEL=gpt-4
+```
+See `.env.example` for more options including OpenRouter support.
 
 ### How to run the code:
 - If you would like to try running the entire system from start to finish, only inputting a scenario of interest, you can use the following command:
@@ -190,7 +198,7 @@ Each file is named according to the scenario it pertains to, ensuring organized 
 python -m src run-experiment-with-scm "src/Example/3 bidders participating in an auction for a piece of art starting at fifty dollars.json"
 ``` 
 ```
-python -m src run-experiment-with-scm "src/Example/a judge is setting bail for a criminal defendant who committed 50,000 dollars in tax fraud.json.json"
+python -m src run-experiment-with-scm "src/Example/a judge is setting bail for a criminal defendant who committed 50,000 dollars in tax fraud.json"
 ``` 
 ```
 python -m src run-experiment-with-scm "src/Example/lawyer_interview_3var.json"

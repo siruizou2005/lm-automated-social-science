@@ -7,12 +7,12 @@ sys.path.append("../LLM")
 from DataParser import DataParser
 from DataCleaner import DataCleaner
 from DataAnalyst import DataAnalyst
-from LLM import LanguageModel
+from LLM import LanguageModel, make_llm
 
 ### setup
 if __name__ == "__main__":
     # YOU SHOULD KEEP TERMERATURE TO 0.1 HERE, WE WANT HIGH PRECISION ON ANSWERS
-    LLM = LanguageModel(family="openai", model="gpt-4", temperature=0.1)
+    LLM = make_llm("scientist", temperature=0.1)
     directory_path = "/Users/benjaminmanning/Desktop/test2/"
     file_name = "result.json"
     file_path = os.path.join(directory_path, file_name)

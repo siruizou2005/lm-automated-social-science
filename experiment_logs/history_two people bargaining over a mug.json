@@ -1,0 +1,104 @@
+{
+    "histories": [
+        [
+            {
+                "maya": "Hi Leo, I'm selling this mug. I'm asking $40 for it."
+            },
+            {
+                "leo": "$40 is way too high. I can offer $5."
+            },
+            {
+                "maya": "$5 is far too low. I'm quite attached to this mug. My lowest price is $25."
+            },
+            {
+                "leo": "$25 is still too much. I can go up to $10."
+            },
+            {
+                "maya": "$10 is still too low. I can't go below $25."
+            },
+            {
+                "leo": "$15 is my final offer."
+            },
+            {
+                "maya": "$20 is my absolute lowest."
+            },
+            {
+                "leo": "$18, take it or leave it."
+            },
+            {
+                "maya": "$18 is below my minimum. I can't accept less than $25."
+            }
+        ],
+        [
+            {
+                "maya": "This mug is very special to me. I'm asking $50 for it."
+            },
+            {
+                "leo": "$5 is my offer."
+            },
+            {
+                "maya": "That's far too low. My absolute minimum is $25."
+            },
+            {
+                "leo": "$7, final offer."
+            },
+            {
+                "maya": "$25 is my final price."
+            }
+        ],
+        [
+            {
+                "maya": "Hi Leo! I'm selling this mug. It has some sentimental value to me, so I'm looking for a good offer. What would you like to pay for it?"
+            },
+            {
+                "leo": "Hi Maya! I like the mug, but I'm on a tight budget. Would you consider $5?"
+            },
+            {
+                "maya": "$5 is too low for me. I can't go below $20."
+            },
+            {
+                "leo": "$20 is way above my budget. I could go up to $8, but that's my final offer."
+            },
+            {
+                "maya": "$8 is still too low. My minimum is $20. Can you meet that?"
+            },
+            {
+                "leo": "$8 is my absolute max. I can't go higher."
+            }
+        ],
+        [
+            {
+                "maya": "This mug is very special to me, so I'm only willing to part with it for a serious offer. I'm asking $50."
+            },
+            {
+                "leo": "$50 is far above my budget. I can offer $5."
+            },
+            {
+                "maya": "$5 is far too low. Given its sentimental value, I can't accept less than $50."
+            }
+        ],
+        [
+            {
+                "maya": "Hi Leo, I'm selling this mug. It's special to me, so I'm looking for a good offer. What would you like to pay?"
+            },
+            {
+                "leo": "I'll offer 5."
+            },
+            {
+                "maya": "5 is too low. I can't accept less than 10. Can you offer more?"
+            },
+            {
+                "leo": "I can go up to 8."
+            },
+            {
+                "maya": "8 is still below my minimum. I need at least 10."
+            },
+            {
+                "leo": "I understand, but 10 is my final offer."
+            },
+            {
+                "maya": "Deal."
+            }
+        ]
+    ]
+}
